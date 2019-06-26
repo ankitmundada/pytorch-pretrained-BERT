@@ -87,6 +87,48 @@ class DataProcessor(object):
             return lines
 
 
+class StringsProcessor(DataProcessor):
+    """Processor for the Strings data set."""
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_data(os.path.join(data_dir, "train.data")), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_data(os.path.join(data_dir, "dev.data")), "dev")
+
+    def get_labels(self):
+        """See base class."""
+        return ["Other", "Product Info", "Objection"\
+                "Pricing", "Competitor", "Next Steps"]
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training and dev sets."""
+        examples = []
+        for (i, line) in enumerate(lines):
+            guid = "%s-%s" % (set_type, i)
+            text_a = line[2]
+            label = line[4]
+            examples.append(
+                InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
+        return examples
+
+    def _read_data(cls, input_file, skip_header=False, quotechar=None):
+        """Reads a data file."""
+        with open(input_file, "r", encoding="utf-8") as f:
+            reader = csv.reader(f, delimiter="|", quotechar=quotechar)
+            lines = []
+            for line in reader[int(skip_header):]:
+                if sys.version_info[0] == 2:
+                    line = list(unicode(cell, 'utf-8') for cell in line)
+                lines.append(line)
+            return lines
+
+
+
 class MrpcProcessor(DataProcessor):
     """Processor for the MRPC data set (GLUE version)."""
 
@@ -556,6 +598,7 @@ processors = {
     "qnli": QnliProcessor,
     "rte": RteProcessor,
     "wnli": WnliProcessor,
+    "strings": StringsProcessor,
 }
 
 output_modes = {
@@ -568,4 +611,5 @@ output_modes = {
     "qnli": "classification",
     "rte": "classification",
     "wnli": "classification",
+    "strings": "classification",
 }
