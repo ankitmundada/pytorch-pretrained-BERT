@@ -21,12 +21,14 @@ import csv
 import logging
 import os
 import sys
+import pandas as pd
 
 from scipy.stats import pearsonr, spearmanr
-from sklearn.metrics import matthews_corrcoef, f1_score
+from sklearn.metrics import matthews_corrcoef, f1_score, confusion_matrix
 
 logger = logging.getLogger(__name__)
 
+STRINGS_CLASSES = ["Other", "Product Info", "Objection", "Pricing", "Competitor", "Next Steps"]
 
 class InputExample(object):
     """A single training/test example for simple sequence classification."""
@@ -102,8 +104,7 @@ class StringsProcessor(DataProcessor):
 
     def get_labels(self):
         """See base class."""
-        return ["Other", "Product Info", "Objection"\
-                "Pricing", "Competitor", "Next Steps"]
+        return STRINGS_CLASSES
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
@@ -121,7 +122,8 @@ class StringsProcessor(DataProcessor):
         with open(input_file, "r", encoding="utf-8") as f:
             reader = csv.reader(f, delimiter="|", quotechar=quotechar)
             lines = []
-            for line in reader[int(skip_header):]:
+            for line in reader:
+                if skip_header: continue
                 if sys.version_info[0] == 2:
                     line = list(unicode(cell, 'utf-8') for cell in line)
                 lines.append(line)
@@ -542,6 +544,17 @@ def simple_accuracy(preds, labels):
     return (preds == labels).mean()
 
 
+def acc_and_f1_strings(preds, labels):
+    acc = simple_accuracy(preds, labels)
+    f1 = f1_score(y_true=labels, y_pred=preds, labels=list(range(6)), average=None)
+    cm = confusion_matrix(y_true=labels, y_pred=preds, labels=list(range(6)))
+    cm = pd.DataFrame(data=cm, index=STRINGS_CLASSES, columns=STRINGS_CLASSES)
+    print(cm)
+    return {
+        "acc": acc,
+        "f1": f1,
+    }
+
 def acc_and_f1(preds, labels):
     acc = simple_accuracy(preds, labels)
     f1 = f1_score(y_true=labels, y_pred=preds)
@@ -550,7 +563,6 @@ def acc_and_f1(preds, labels):
         "f1": f1,
         "acc_and_f1": (acc + f1) / 2,
     }
-
 
 def pearson_and_spearman(preds, labels):
     pearson_corr = pearsonr(preds, labels)[0]
@@ -584,6 +596,8 @@ def compute_metrics(task_name, preds, labels):
         return {"acc": simple_accuracy(preds, labels)}
     elif task_name == "wnli":
         return {"acc": simple_accuracy(preds, labels)}
+    elif task_name == "strings":
+        return acc_and_f1_strings(preds, labels)
     else:
         raise KeyError(task_name)
 
