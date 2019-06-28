@@ -92,10 +92,16 @@ class DataProcessor(object):
 class StringsProcessor(DataProcessor):
     """Processor for the Strings data set."""
 
+    def __init__(self):
+        self.train_data = None
+
+
     def get_train_examples(self, data_dir):
         """See base class."""
-        return self._create_examples(
-            self._read_data(os.path.join(data_dir, "train.data")), "train")
+        if not self.train_data:
+            self.train_data = self._create_examples(
+                self._read_data(os.path.join(data_dir, "train.data")), "train")
+        return self.train_data
 
     def get_dev_examples(self, data_dir):
         """See base class."""
@@ -117,7 +123,7 @@ class StringsProcessor(DataProcessor):
                 InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
         return examples
 
-    def _read_data(cls, input_file, skip_header=False, quotechar=None):
+    def _read_data(self, input_file, skip_header=False, quotechar=None):
         """Reads a data file."""
         with open(input_file, "r", encoding="utf-8") as f:
             reader = csv.reader(f, delimiter="|", quotechar=quotechar)

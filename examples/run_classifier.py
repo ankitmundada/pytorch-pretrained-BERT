@@ -50,6 +50,19 @@ else:
 logger = logging.getLogger(__name__)
 
 
+def make_weights_for_balanced_classes(all_label_ids, nclasses):
+    count = [0] * nclasses
+    for item in all_label_ids:
+        count[item] += 1
+    weight_per_class = [0.] * nclasses
+    N = float(sum(count))
+    for i in range(nclasses):
+        weight_per_class[i] = N/float(count[i])
+    weight = [0] * len(all_label_ids)
+    for idx, val in enumerate(all_label_ids):
+        weight[idx] = weight_per_class[val]
+    return weight, weight_per_class
+
 def main():
     parser = argparse.ArgumentParser()
 
@@ -94,6 +107,12 @@ def main():
     parser.add_argument("--do_lower_case",
                         action='store_true',
                         help="Set this flag if you are using an uncased model.")
+    parser.add_argument("--use_weighted_sampler",
+                        action='store_true',
+                        help="Use weighted sampling to mitigate class-imbalance")
+    parser.add_argument("--use_weighted_loss",
+                        action='store_true',
+                        help="Use weighted Loss Penalties to mitigate class-imbalance")
     parser.add_argument("--train_batch_size",
                         default=32,
                         type=int,
@@ -255,7 +274,11 @@ def main():
 
         train_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_label_ids)
         if args.local_rank == -1:
-            train_sampler = RandomSampler(train_data)
+            if args.use_weighted_sampler:
+                weights, _ = make_weights_for_balanced_classes(all_label_ids, len(label_list))
+                train_sampler = torch.utils.data.WeightedRandomSampler(weights, len(weights))
+            else:
+                train_sampler = RandomSampler(train_data)
         else:
             train_sampler = DistributedSampler(train_data)
         train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=args.train_batch_size)
@@ -294,6 +317,10 @@ def main():
                                  warmup=args.warmup_proportion,
                                  t_total=num_train_optimization_steps)
 
+        if args.use_weighted_loss:
+            _, weight_per_class = make_weights_for_balanced_classes(all_label_ids, len(label_list))
+            weight_per_class = torch.tensor(weight_per_class)
+
         logger.info("***** Running training *****")
         logger.info("  Num examples = %d", len(train_examples))
         logger.info("  Batch size = %d", args.train_batch_size)
@@ -311,7 +338,7 @@ def main():
                 logits = model(input_ids, token_type_ids=segment_ids, attention_mask=input_mask)
 
                 if output_mode == "classification":
-                    loss_fct = CrossEntropyLoss()
+                    loss_fct = CrossEntropyLoss(weight=weight_per_class)
                     loss = loss_fct(logits.view(-1, num_labels), label_ids.view(-1))
                 elif output_mode == "regression":
                     loss_fct = MSELoss()
