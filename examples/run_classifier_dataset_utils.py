@@ -29,6 +29,7 @@ from sklearn.metrics import matthews_corrcoef, f1_score, confusion_matrix
 logger = logging.getLogger(__name__)
 
 STRINGS_CLASSES = ["Other", "Product Info", "Objection", "Pricing", "Competitor", "Next Steps"]
+KEEP_CLASSES = ["Other", "Product Info"]
 
 class InputExample(object):
     """A single training/test example for simple sequence classification."""
@@ -110,7 +111,7 @@ class StringsProcessor(DataProcessor):
 
     def get_labels(self):
         """See base class."""
-        return STRINGS_CLASSES
+        return KEEP_CLASSES
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
@@ -119,8 +120,9 @@ class StringsProcessor(DataProcessor):
             guid = "%s-%s" % (set_type, i)
             text_a = line[2]
             label = line[4]
-            examples.append(
-                InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
+            if label in KEEP_CLASSES: 
+                examples.append(
+                    InputExample(guid=guid, text_a=text_a, text_b=None, label=label))
         return examples
 
     def _read_data(self, input_file, skip_header=False, quotechar=None):
@@ -554,7 +556,7 @@ def acc_and_f1_strings(preds, labels):
     acc = simple_accuracy(preds, labels)
     f1 = f1_score(y_true=labels, y_pred=preds, labels=list(range(6)), average=None)
     cm = confusion_matrix(y_true=labels, y_pred=preds, labels=list(range(6)))
-    cm = pd.DataFrame(data=cm, index=STRINGS_CLASSES, columns=STRINGS_CLASSES)
+    cm = pd.DataFrame(data=cm, index=KEEP_CLASSES, columns=KEEP_CLASSES)
     print(cm)
     return {
         "acc": acc,
