@@ -109,6 +109,11 @@ class StringsProcessor(DataProcessor):
         return self._create_examples(
             self._read_data(os.path.join(data_dir, "dev.data")), "dev")
 
+    def get_debug_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_data(os.path.join(data_dir, "debug.data")), "debug")
+
     def get_labels(self):
         """See base class."""
         return KEEP_CLASSES
@@ -439,11 +444,17 @@ class WnliProcessor(DataProcessor):
         return examples
 
 
+def label_idx_mapper(label_list):
+    label_to_idx_map = {label : i for i, label in enumerate(label_list)}
+    idx_to_label_map = {str(i) : label for i, label in enumerate(label_list)}
+    return label_to_idx_map, idx_to_label_map
+
+
 def convert_examples_to_features(examples, label_list, max_seq_length,
                                  tokenizer, output_mode):
     """Loads a data file into a list of `InputBatch`s."""
 
-    label_map = {label : i for i, label in enumerate(label_list)}
+    label_map, _ = label_idx_mapper(label_list)
 
     features = []
     for (ex_index, example) in enumerate(examples):
@@ -553,9 +564,10 @@ def simple_accuracy(preds, labels):
 
 
 def acc_and_f1_strings(preds, labels):
+    num_classes = len(KEEP_CLASSES)
     acc = simple_accuracy(preds, labels)
-    f1 = f1_score(y_true=labels, y_pred=preds, labels=list(range(6)), average=None)
-    cm = confusion_matrix(y_true=labels, y_pred=preds, labels=list(range(6)))
+    f1 = f1_score(y_true=labels, y_pred=preds, labels=list(range(num_classes)), average=None)
+    cm = confusion_matrix(y_true=labels, y_pred=preds, labels=list(range(num_classes)))
     cm = pd.DataFrame(data=cm, index=KEEP_CLASSES, columns=KEEP_CLASSES)
     print(cm)
     return {

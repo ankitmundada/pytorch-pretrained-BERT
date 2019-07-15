@@ -39,7 +39,7 @@ from pytorch_pretrained_bert.modeling import BertForSequenceClassification
 from pytorch_pretrained_bert.tokenization import BertTokenizer
 from pytorch_pretrained_bert.optimization import BertAdam, WarmupLinearSchedule
 
-from run_classifier_dataset_utils import processors, output_modes, convert_examples_to_features, compute_metrics
+from run_classifier_dataset_utils import processors, output_modes, convert_examples_to_features, compute_metrics, label_idx_mapper
 
 if sys.version_info[0] == 2:
     import cPickle as pickle
@@ -92,6 +92,10 @@ def main():
                         default="",
                         type=str,
                         help="Where do you want to store the pre-trained models downloaded from s3")
+    parser.add_argument("--pred_logs_file",
+                        default=None,
+                        type=str,
+                        help="Where do you want to store the eval mode logs")
     parser.add_argument("--max_seq_length",
                         default=128,
                         type=int,
@@ -104,6 +108,9 @@ def main():
     parser.add_argument("--do_eval",
                         action='store_true',
                         help="Whether to run eval on the dev set.")
+    parser.add_argument("--debug",
+                        action='store_true',
+                        help="Whether to run in debug mode or not")
     parser.add_argument("--do_lower_case",
                         action='store_true',
                         help="Set this flag if you are using an uncased model.")
@@ -247,11 +254,19 @@ def main():
             tb_writer = SummaryWriter()
 
         # Prepare data loader
-        train_examples = processor.get_train_examples(args.data_dir)
-        cached_train_features_file = os.path.join(args.data_dir, 'train_{0}_{1}_{2}'.format(
-            list(filter(None, args.bert_model.split('/'))).pop(),
-                        str(args.max_seq_length),
-                        str(task_name)))
+        if args.debug:
+            print("NOTE: Loading debug examples, since debug mode is on")
+            train_examples = processor.get_debug_examples(args.data_dir)
+            cached_train_features_file = os.path.join(args.data_dir, 'debug_{0}_{1}_{2}'.format(
+                list(filter(None, args.bert_model.split('/'))).pop(),
+                            str(args.max_seq_length),
+                            str(task_name)))
+        else:
+            train_examples = processor.get_train_examples(args.data_dir)
+            cached_train_features_file = os.path.join(args.data_dir, 'train_{0}_{1}_{2}'.format(
+                list(filter(None, args.bert_model.split('/'))).pop(),
+                            str(args.max_seq_length),
+                            str(task_name)))
         try:
             with open(cached_train_features_file, "rb") as reader:
                 train_features = pickle.load(reader)
@@ -399,11 +414,19 @@ def main():
 
     ### Evaluation
     if args.do_eval and (args.local_rank == -1 or torch.distributed.get_rank() == 0):
-        eval_examples = processor.get_dev_examples(args.data_dir)
-        cached_eval_features_file = os.path.join(args.data_dir, 'dev_{0}_{1}_{2}'.format(
-            list(filter(None, args.bert_model.split('/'))).pop(),
-                        str(args.max_seq_length),
-                        str(task_name)))
+        if args.debug:
+            print("NOTE: Loading debug examples, since debug mode is on")
+            eval_examples = processor.get_debug_examples(args.data_dir)
+            cached_eval_features_file = os.path.join(args.data_dir, 'debug_{0}_{1}_{2}'.format(
+                list(filter(None, args.bert_model.split('/'))).pop(),
+                            str(args.max_seq_length),
+                            str(task_name)))
+        else:
+            eval_examples = processor.get_dev_examples(args.data_dir)
+            cached_eval_features_file = os.path.join(args.data_dir, 'dev_{0}_{1}_{2}'.format(
+                list(filter(None, args.bert_model.split('/'))).pop(),
+                            str(args.max_seq_length),
+                            str(task_name)))
         try:
             with open(cached_eval_features_file, "rb") as reader:
                 eval_features = pickle.load(reader)
@@ -442,6 +465,11 @@ def main():
         preds = []
         out_label_ids = None
 
+        TOKENS = ['[PAD]', '[SEP]', '[CLS]']
+        pred_logs = [("Original text", "Input tokens", "Prediction", "Expected")]
+        sample_idx = 0
+        _, idx_label_map = label_idx_mapper(label_list)
+
         for input_ids, input_mask, segment_ids, label_ids in tqdm(eval_dataloader, desc="Evaluating"):
             input_ids = input_ids.to(device)
             input_mask = input_mask.to(device)
@@ -470,6 +498,21 @@ def main():
                 out_label_ids = np.append(
                     out_label_ids, label_ids.detach().cpu().numpy(), axis=0)
 
+            pred_vals = np.argmax(logits.detach().cpu().numpy(), axis=1)
+            label_vals = label_ids.detach().cpu().numpy()
+            for i, inp in enumerate(input_ids.detach().cpu()):
+                inp = tokenizer.convert_ids_to_tokens(inp.numpy())
+                inp = ['' if t in TOKENS else t for t in inp] 
+                inp = " ".join(inp).replace(",", "")
+                pred_val = idx_label_map[str(pred_vals[i])]
+                label_val = idx_label_map[str(label_vals[i])]
+                print(pred_val, label_val)
+                text = eval_examples[sample_idx].text_a.replace(",", "")
+                log = (text, inp, pred_val, label_val)
+                pred_logs.append(log)
+                sample_idx += 1
+
+
         eval_loss = eval_loss / nb_eval_steps
         preds = preds[0]
         if output_mode == "classification":
@@ -483,6 +526,11 @@ def main():
         result['eval_loss'] = eval_loss
         result['global_step'] = global_step
         result['loss'] = loss
+
+        if args.pred_logs_file:
+            with open(args.pred_logs_file, 'w') as out:
+                for log in pred_logs:
+                    out.write("{}\n".format(", ".join(log)))
 
         output_eval_file = os.path.join(args.output_dir, "eval_results.txt")
         with open(output_eval_file, "w") as writer:
@@ -501,7 +549,12 @@ def main():
             if not os.path.exists(args.output_dir + '-MM'):
                 os.makedirs(args.output_dir + '-MM')
 
-            eval_examples = processor.get_dev_examples(args.data_dir)
+            if args.debug:
+                print("NOTE: Loading debug examples, since debug mode is on")
+                eval_examples = processor.get_debug_examples(args.data_dir)
+            else:
+                eval_examples = processor.get_dev_examples(args.data_dir)
+
             eval_features = convert_examples_to_features(
                 eval_examples, label_list, args.max_seq_length, tokenizer, output_mode)
             logger.info("***** Running evaluation *****")
@@ -546,10 +599,12 @@ def main():
                     out_label_ids = np.append(
                         out_label_ids, label_ids.detach().cpu().numpy(), axis=0)
 
+
             eval_loss = eval_loss / nb_eval_steps
             preds = preds[0]
             preds = np.argmax(preds, axis=1)
             result = compute_metrics(task_name, preds, out_label_ids)
+
 
             loss = tr_loss/global_step if args.do_train else None
 
